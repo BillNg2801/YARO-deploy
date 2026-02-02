@@ -1,0 +1,190 @@
+OUTLOOK AUTO-RESPONDER + TELEGRAM NOTIFIER — WORKFLOW REFERENCE
+
+Goal
+- Event-driven system: backend stays "idle" until it receives an event (webhook), runs briefly, then stops.
+- New email arrives in Outlook -> backend wakes -> (optionally) drafts/sends reply -> Telegram notifies user.
+- User actions in Telegram (View/Draft/Send/Edit) -> backend wakes -> performs action -> responds in Telegram.
+
+Core Components (high-level)
+- Backend hosted on :contentReference[oaicite:0]{index=0} (or similar serverless platform).
+- Email events + sending handled via :contentReference[oaicite:1]{index=1} for :contentReference[oaicite:2]{index=2} mailboxes.
+- Notifications + user control UI via :contentReference[oaicite:3]{index=3} bot (webhook-based).
+- Persistent storage (DB) for tokens, users, state, dedupe, subscriptions.
+- Optional AI drafting via :contentReference[oaicite:4]{index=4}.
+
+Key Principle: "Idle" means
+- No process is constantly running.
+- The platform keeps HTTPS endpoints available.
+- Code executes only when an HTTP event arrives (Graph webhook or Telegram webhook).
+- All continuity is stored in the database (functions are stateless between runs).
+
+Data that MUST be stored (minimum)
+- Users table:
+  - user_id
+  - outlook_account_id / mailbox identifier
+  - encrypted refresh_token (OAuth)
+  - token metadata (scopes, expires_at, etc.)
+  - telegram_chat_id
+  - user preferences (tone, auto-send on/off, allowlist/denylist, etc.)
+- Subscriptions table:
+  - subscription_id (Graph)
+  - user_id
+  - resource (mailbox folder / messages)
+  - expiration_datetime
+  - client_state secret (for validation)
+- Messages table (lightweight indexing, not necessarily full bodies):
+  - message_id (Graph id)
+  - user_id
+  - from, subject, received_datetime, thread_id
+  - short preview/snippet
+  - status flags (notified, replied, ignored, etc.)
+- Dedupe table / fields:
+  - processed_event_id or processed_message_id+change_key
+  - timestamps (to avoid double-processing on retries)
+- Drafts table (optional):
+  - draft_id
+  - message_id (the email being replied to)
+  - draft_text
+  - created_by (telegram_user)
+  - status (pending, sent, canceled)
+
+Endpoints (recommended shape)
+1) Graph webhook receiver:
+   - POST /api/graph/webhook
+   - Handles Graph subscription validation handshake.
+   - Receives "new mail" notifications.
+2) Telegram webhook receiver:
+   - POST /api/telegram/webhook
+   - Receives messages and button presses (callback queries).
+3) Subscription management:
+   - POST /api/graph/subscribe (called after OAuth connect)
+   - POST /api/graph/renew (called by scheduler/cron)
+4) Optional internal utilities:
+   - POST /api/health
+   - POST /api/admin/replay-event (debug)
+
+WORKFLOW — SETUP / ONBOARDING
+
+A) Connect Outlook account (OAuth)
+- User initiates "Connect Outlook" (via web UI or Telegram command).
+- Backend completes OAuth flow, obtains access_token + refresh_token.
+- Store refresh_token encrypted in DB.
+- Immediately create Graph subscription for that mailbox/folder.
+
+B) Create Graph subscription
+- Backend calls Graph "create subscription" with:
+  - changeType: created (new messages)
+  - notificationUrl: https://<your-domain>/api/graph/webhook
+  - clientState: random secret saved in DB
+  - expirationDateTime: provided by Graph response
+- Save subscription_id + expiration in DB.
+- Note: subscriptions expire and must be renewed periodically.
+
+C) Set Telegram webhook
+- Backend sets Telegram webhook to:
+  - https://<your-domain>/api/telegram/webhook
+- Store telegram_chat_id per user (collected when user messages the bot /start).
+
+WORKFLOW — RUNTIME EVENTS (THE "IDLE -> WAKE -> IDLE" LOOP)
+
+1) New email arrives (Graph -> backend)
+Trigger:
+- Outlook mailbox receives a new message.
+- Graph sends a notification POST to /api/graph/webhook.
+
+Backend handling (minimal reliable sequence):
+1. Verify request authenticity:
+   - validate clientState matches what's stored for subscription_id
+   - (and/or other recommended checks)
+2. Dedupe:
+   - if this notification/message already processed, exit fast.
+3. Fetch email details:
+   - use Graph API to fetch message by id
+   - optionally fetch only metadata first (from/subject/preview/thread id)
+4. Store/update message record in DB.
+5. Decision logic:
+   - if auto-reply enabled and rules match -> generate reply (AI or template) -> send reply via Graph.
+   - else only notify Telegram that a new email exists.
+6. Notify Telegram:
+   - sendMessage to user's chat_id:
+     - "📩 New email from X: Subject"
+     - include inline buttons: [View] [Draft reply] [Ignore]
+7. End function (go idle).
+
+2) User presses "View" in Telegram (Telegram -> backend)
+Trigger:
+- User taps inline button "View" for a specific message_id.
+
+Backend handling:
+1. Parse callback data -> identify message_id + user_id.
+2. Load message record (and/or re-fetch full content from Graph).
+3. Send Telegram message with:
+   - sender, subject, received time
+   - body (or a safe truncated version)
+   - buttons: [Draft reply] [Quick reply templates] [Back]
+4. End function (go idle).
+
+3) User requests a draft (Telegram -> backend -> AI -> Telegram)
+Trigger:
+- User taps "Draft reply" or types "reply: …".
+
+Backend handling:
+1. Identify which email/thread this action targets (message_id).
+2. Fetch necessary context:
+   - email body + subject + recent thread messages if needed
+   - user preferences (tone, length, language)
+3. Produce draft:
+   - either rule-based template or AI-generated draft
+4. Store draft in DB with status=pending.
+5. Send Telegram message showing draft text + buttons:
+   - [Send] [Edit] [Regenerate] [Cancel]
+6. End function (go idle).
+
+4) User edits draft (Telegram -> backend)
+Trigger:
+- User taps "Edit" then sends new text, or sends a message that is treated as the edited draft.
+
+Backend handling:
+1. Update the stored draft_text in DB.
+2. Show updated draft + [Send] [Edit] [Cancel].
+3. End function.
+
+5) User presses "Send" (Telegram -> backend -> Graph -> Telegram)
+Trigger:
+- User taps "Send" for a pending draft.
+
+Backend handling:
+1. Load draft + target message/thread from DB.
+2. Call Graph to send reply:
+   - reply to message/thread, or sendMail with appropriate headers
+3. Mark draft status=sent and message status=replied.
+4. Notify Telegram:
+   - "✅ Reply sent."
+5. End function (go idle).
+
+WORKFLOW — SUBSCRIPTION RENEWAL (CRITICAL)
+- Graph subscriptions expire.
+- A scheduler (cron) must run periodically:
+  - find subscriptions expiring soon
+  - call Graph "renew subscription" / update expiration
+  - store new expiration time
+- If renewal fails:
+  - attempt retries
+  - notify user if reconnection is required (OAuth issue, revoked permissions)
+
+RELIABILITY RULES (MUST-HAVES)
+- Dedupe: Graph and Telegram can retry deliveries. Never send duplicate replies.
+- Idempotency: "Send" should be safe against double clicks.
+- Timeouts: keep each event handling run short; do heavy work only when necessary.
+- Rate limits: handle Graph and Telegram rate limiting with retries/backoff.
+- Security:
+  - encrypt refresh tokens at rest
+  - validate webhook authenticity where applicable
+  - never log sensitive email bodies in plaintext
+
+USER EXPERIENCE SUMMARY (THE LOOP)
+- New email -> Telegram ping with buttons.
+- View -> Telegram shows email.
+- Draft -> Telegram shows AI draft.
+- Send -> backend replies via Graph -> Telegram confirms.
+- No long-running process; everything happens via webhooks + database state.

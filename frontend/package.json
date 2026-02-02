@@ -1,0 +1,13 @@
+{
+  "name": "yaro-frontend",
+  "version": "1.0.0",
+  "description": "Simple frontend server for YARO OUTLOOK",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT"
+}
+

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>YARO Frontend</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        background: linear-gradient(135deg, #0f172a, #020617);
+        color: #e5e7eb;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+      }
+      .card {
+        background: rgba(15, 23, 42, 0.9);
+        border-radius: 18px;
+        padding: 32px 40px;
+        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.9);
+        max-width: 420px;
+        width: 100%;
+        border: 1px solid rgba(148, 163, 184, 0.3);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+        letter-spacing: 0.03em;
+      }
+      p {
+        margin: 4px 0 16px;
+        color: #9ca3af;
+      }
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: rgba(37, 99, 235, 0.12);
+        border: 1px solid rgba(59, 130, 246, 0.5);
+        color: #dbeafe;
+        font-size: 12px;
+        margin-bottom: 16px;
+      }
+      .ports {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-top: 12px;
+      }
+      .port-card {
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: rgba(15, 23, 42, 0.9);
+        border: 1px solid rgba(55, 65, 81, 0.8);
+      }
+      .port-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #9ca3af;
+        margin-bottom: 2px;
+      }
+      .port-value {
+        font-size: 16px;
+        font-weight: 600;
+      }
+      .hint {
+        font-size: 12px;
+        color: #6b7280;
+        margin-top: 16px;
+      }
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        background: rgba(15, 23, 42, 0.9);
+        padding: 3px 6px;
+        border-radius: 6px;
+        border: 1px solid rgba(55, 65, 81, 0.8);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <div class="tag">
+        <span>YARO OUTLOOK</span>
+        <span>•</span>
+        <span>Frontend</span>
+      </div>
+      <h1>Frontend dev shell</h1>
+      <p>
+        This UI is served from the frontend server. Your backend API will run
+        on a different port.
+      </p>
+
+      <section class="ports">
+        <div class="port-card">
+          <div class="port-label">Frontend port</div>
+          <div class="port-value">3000</div>
+        </div>
+        <div class="port-card">
+          <div class="port-label">Backend port</div>
+          <div class="port-value">5000</div>
+        </div>
+      </section>
+
+      <p class="hint">
+        Start servers:
+        <br />
+        <code>cd backend &amp;&amp; npm start</code>
+        <br />
+        <code>cd frontend &amp;&amp; npm start</code>
+      </p>
+    </main>
+    <script>
+      // Example call to backend health endpoint
+      fetch("http://localhost:5000/api/health")
+        .then((res) => res.json())
+        .then((data) => {
+          console.log("Backend health:", data);
+        })
+        .catch((err) => console.warn("Backend not running yet:", err));
+    </script>
+  </body>
+</html>
+

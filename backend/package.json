@@ -1,0 +1,25 @@
+{
+  "name": "yaro-backend",
+  "version": "1.0.0",
+  "description": "Microsoft Graph OAuth puller for YARO OUTLOOK",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "@azure/msal-node": "^2.16.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "mongoose": "^8.0.0",
+    "node-fetch": "^2.7.0",
+    "node-telegram-bot-api": "^0.66.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT"
+}
+
