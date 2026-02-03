@@ -3,7 +3,7 @@ const path = require('path');
 const mongoose = require('mongoose');
 require('dotenv').config();
 
-const { pca, SCOPES, persistCache } = require('./authConfig');
+const { pca, SCOPES } = require('./authConfig');
 const { graphFetch } = require('./graphClient');
 const { startTelegramBot } = require('./telegramBot');
 const { connectDB } = require('./db');
@@ -53,9 +53,6 @@ app.get('/auth/callback', async (req, res) => {
       scopes: SCOPES,
       redirectUri: process.env.MICROSOFT_REDIRECT_URI,
     });
-
-    // Persist token cache after successful token acquisition
-    persistCache();
 
     res.redirect('/success');
   } catch (err) {

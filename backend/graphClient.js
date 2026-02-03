@@ -1,5 +1,5 @@
 const fetch = require('node-fetch');
-const { pca, SCOPES, persistCache } = require('./authConfig');
+const { pca, SCOPES } = require('./authConfig');
 
 async function getAccessToken() {
   const tokenCache = pca.getTokenCache();
@@ -19,8 +19,6 @@ async function getAccessToken() {
     scopes: SCOPES,
     account,
   });
-
-  persistCache();
 
   return result.accessToken;
 }
