@@ -31,7 +31,7 @@ async function sendTelegramMessage(chatId, text) {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+    body: JSON.stringify({ chat_id: chatId, text }),
   });
   if (!response.ok) {
     const errText = await response.text();
@@ -44,9 +44,60 @@ function stripHtml(content) {
   return String(content).replace(/<[^>]*>/g, '');
 }
 
-async function summarizeWithOpenAI(text) {
+const HTML_ENTITIES = {
+  '&nbsp;': ' ',
+  '&amp;': '&',
+  '&lt;': '<',
+  '&gt;': '>',
+  '&quot;': '"',
+  '&#39;': "'",
+  '&apos;': "'",
+};
+
+function decodeHtmlEntities(content) {
+  if (!content) return '';
+  let s = String(content);
+  for (const [entity, char] of Object.entries(HTML_ENTITIES)) {
+    s = s.split(entity).join(char);
+  }
+  return s;
+}
+
+function normalizeWhitespace(content) {
+  if (!content) return '';
+  return String(content)
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\s+/g, ' ')
+    .replace(/\n /g, '\n')
+    .replace(/ \n/g, '\n')
+    .trim()
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+function normalizeEmailBody(content) {
+  return normalizeWhitespace(decodeHtmlEntities(content));
+}
+
+const SIGN_OFF_PATTERN = /(\n\s*)(Best|Regards|Sincerely|Thanks|Thank you|Cheers|Alright[^.]*\.|Take care)[,\s]*\s*[\s\S]*$/i;
+
+function fallbackSummaryBlock(normalizedBody) {
+  const lines = normalizedBody.split(/\n/).filter(Boolean);
+  const greeting = lines[0]?.trim() || '';
+  const rest = lines.slice(1).join(' ').trim().replace(SIGN_OFF_PATTERN, '');
+  const snippet = rest.slice(0, 150).trim();
+  if (!greeting) return snippet || '(No content)';
+  return snippet ? `${greeting}\n\n${snippet}` : greeting;
+}
+
+async function rewriteEmailWithOpenAI(normalizedBody) {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || !text.trim()) return text.slice(0, 200);
+  if (!apiKey || !normalizedBody.trim()) {
+    return fallbackSummaryBlock(normalizedBody);
+  }
 
   try {
     const openai = new OpenAI({ apiKey });
@@ -55,16 +106,22 @@ async function summarizeWithOpenAI(text) {
       messages: [
         {
           role: 'user',
-          content: `Summarize this email in 1-2 sentences. Do not include closings like Sincerely or Best regards. Output only the summary.\n\n${text}`,
+          content: `Rewrite this email into exactly this format. Output ONLY:
+1) One line: the greeting only (e.g. "Dear Yaroslavl," or "Hi,").
+2) A blank line.
+3) One or two sentences that summarize the main point of the email. Do not include any sign-off (no Best, Sincerely, Regards, Thanks, Alright, etc.). Do not include closings.
+
+Email:
+${normalizedBody}`,
         },
       ],
-      max_tokens: 150,
+      max_tokens: 200,
     });
-    const summary = completion.choices?.[0]?.message?.content?.trim();
-    return summary || text.slice(0, 200);
+    const out = completion.choices?.[0]?.message?.content?.trim();
+    return out || fallbackSummaryBlock(normalizedBody);
   } catch (err) {
-    console.error('OpenAI summarization failed:', err.message);
-    return text.slice(0, 200);
+    console.error('OpenAI rewrite failed:', err.message);
+    return fallbackSummaryBlock(normalizedBody);
   }
 }
 
@@ -111,23 +168,23 @@ async function handleMailNotification(notification) {
       const contentType = bodyObj.contentType || 'text';
       let content = bodyObj.content || '';
       if (contentType === 'html') content = stripHtml(content);
+      const normalizedBody = normalizeEmailBody(content);
 
       const isInThread = await isThread(message.conversationId || '');
       const header = isInThread
         ? `A new email was sent from ${senderName} (thread).`
         : `A new email was sent from ${senderName}.`;
 
-      const lines = content.split(/\r?\n/).filter(Boolean);
-      const greeting = lines[0]?.trim() || '';
-      const rest = lines.slice(1).join('\n').trim();
-
-      let summary = rest;
-      if (rest.length > 50) {
-        summary = await summarizeWithOpenAI(rest);
+      let summaryBlock;
+      if (!normalizedBody.trim()) {
+        summaryBlock = '(No content)';
+      } else if (normalizedBody.length <= 40 && normalizedBody.indexOf('\n') === -1) {
+        summaryBlock = normalizedBody;
+      } else {
+        summaryBlock = await rewriteEmailWithOpenAI(normalizedBody);
       }
-      const bodyText = greeting ? `${greeting}\n${summary}` : summary;
 
-      const fullMessage = `${header}\n\n${bodyText}`;
+      const fullMessage = `${header}\n\nSummary:\n\n${summaryBlock}`;
 
       const chatIds = await getTelegramChatIds();
       for (const chatId of chatIds) {
