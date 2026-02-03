@@ -282,9 +282,9 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          chat_id: chatId,
-          text: "You're registered for email notifications.",
-        }),
+            chat_id: chatId,
+            text: 'Notifications set up is completed!',
+          }),
       });
     }
   } catch (err) {
