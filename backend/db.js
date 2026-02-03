@@ -8,13 +8,14 @@ async function connectDB() {
   }
   try {
     await mongoose.connect(uri);
-    console.log('MongoDB connected:', mongoose.connection.host, '| database:', mongoose.connection.db.databaseName);
-    // Ensure "tester" database exists by writing one sample doc (MongoDB creates DB on first write)
-    await mongoose.connection.db.collection('samples').updateOne(
-      { _id: 'init' },
-      { $set: { created: new Date(), note: 'Sample database tester' } },
-      { upsert: true }
-    );
+    console.log('MongoDB connected:', mongoose.connection.host, '| database:', mongoose.connection.db?.databaseName ?? 'n/a');
+    if (mongoose.connection.db) {
+      await mongoose.connection.db.collection('samples').updateOne(
+        { _id: 'init' },
+        { $set: { created: new Date(), note: 'Sample database tester' } },
+        { upsert: true }
+      );
+    }
     return mongoose.connection;
   } catch (err) {
     console.error('MongoDB connection error:', err.message);

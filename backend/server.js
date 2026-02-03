@@ -247,13 +247,15 @@ async function sendTelegramReply(chatId, text) {
 }
 
 app.post('/api/telegram/webhook', express.json(), async (req, res) => {
-  res.status(200).send();
   const update = req.body;
   const text = update?.message?.text || '';
   const chatId = update?.message?.chat?.id;
-  if (!chatId) return;
 
   try {
+    if (!chatId) {
+      res.status(200).send();
+      return;
+    }
     if (mongoose.connection.readyState !== 1) await connectDB();
     const col = mongoose.connection.db.collection('telegram_subscribers');
     const doc = await col.findOne({ _id: 'subscribers' });
@@ -272,13 +274,18 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
           "You're not registered yet. Send /start to register for email notifications."
         );
       }
+      res.status(200).send();
       return;
     }
 
     // /start - register for notifications
-    if (!text.startsWith('/start')) return;
+    if (!text.startsWith('/start')) {
+      res.status(200).send();
+      return;
+    }
 
     if (chatIds.includes(chatId)) {
+      res.status(200).send();
       return;
     }
     if (chatIds.length >= 2) {
@@ -286,6 +293,7 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
         chatId,
         'Limit reached. Only 2 users can receive notifications.'
       );
+      res.status(200).send();
       return;
     }
 
@@ -297,8 +305,10 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
     );
 
     await sendTelegramReply(chatId, 'Notifications set up is completed!');
+    res.status(200).send();
   } catch (err) {
     console.error('Telegram webhook error:', err);
+    res.status(200).send();
   }
 });
 
