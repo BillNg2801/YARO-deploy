@@ -52,7 +52,7 @@ const mongoCachePlugin = {
 // File fallback for local dev startup (before first DB access)
 const DATA_DIR = path.join(__dirname, '.data');
 const CACHE_PATH = path.join(DATA_DIR, 'msal-cache.json');
-if (!fs.existsSync(DATA_DIR)) {
+if (!process.env.VERCEL && !fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
