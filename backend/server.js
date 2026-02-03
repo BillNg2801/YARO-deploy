@@ -7,6 +7,11 @@ const { pca, SCOPES } = require('./authConfig');
 const { graphFetch } = require('./graphClient');
 const { startTelegramBot } = require('./telegramBot');
 const { connectDB } = require('./db');
+const { handleMailNotification } = require('./webhook/mailHandler');
+const {
+  createMailSubscription,
+  renewExpiringSubscriptions,
+} = require('./subscription');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -65,7 +70,12 @@ app.get('/auth/callback', async (req, res) => {
 
 // --- Success page ---
 
-app.get('/success', (req, res) => {
+app.get('/success', async (req, res) => {
+  try {
+    await renewExpiringSubscriptions();
+  } catch (e) {
+    /* ignore */
+  }
   res.send(`
     <html>
       <head>
@@ -77,6 +87,8 @@ app.get('/success', (req, res) => {
         <ul>
           <li><a href="/api/me" target="_blank">GET /api/me</a></li>
           <li><a href="/api/inbox?top=10" target="_blank">GET /api/inbox?top=10</a></li>
+          <li><a href="/api/subscribe">Enable email notifications (one-time)</a></li>
+          <li><a href="/api/setup/telegram-webhook">Set Telegram webhook (one-time)</a></li>
         </ul>
       </body>
     </html>
@@ -167,6 +179,143 @@ app.post('/api/send-test', async (req, res) => {
       });
     }
     res.status(500).json({ error: 'graph_error', message: err.message });
+  }
+});
+
+// --- Mail webhook (Microsoft Graph) ---
+
+app.post('/api/webhook/mail', (req, res) => {
+  const validationToken = req.query.validationToken;
+  if (validationToken) {
+    return res.type('text/plain').send(validationToken);
+  }
+  res.status(202).send();
+  handleMailNotification(req.body).catch((err) =>
+    console.error('Mail webhook processing error:', err)
+  );
+});
+
+// --- Subscription creation ---
+
+app.get('/api/subscribe', async (req, res) => {
+  try {
+    const result = await createMailSubscription();
+    res.send(`
+      <html>
+        <head><title>Subscription Created</title></head>
+        <body>
+          <h1>Mail subscription created</h1>
+          <p>New emails will trigger notifications. Subscription ID: ${result?.id || 'N/A'}</p>
+          <p><a href="/success">Back to success page</a></p>
+        </body>
+      </html>
+    `);
+  } catch (err) {
+    console.error('Subscribe error:', err);
+    if (err.code === 'NO_ACCOUNT') {
+      return res.status(400).send(
+        'No Microsoft account connected. <a href="/auth/microsoft/start">Sign in first</a>.'
+      );
+    }
+    res.status(500).send(`Error: ${err.message}`);
+  }
+});
+
+// --- Subscription renewal (call periodically) ---
+
+app.get('/api/cron/renew-subscriptions', async (req, res) => {
+  try {
+    await renewExpiringSubscriptions();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('Renew error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Telegram webhook (receives updates from Telegram) ---
+
+app.post('/api/telegram/webhook', express.json(), async (req, res) => {
+  res.status(200).send();
+  const update = req.body;
+  if (!update?.message?.text?.startsWith('/start')) return;
+
+  const chatId = update.message.chat.id;
+  if (!chatId) return;
+
+  try {
+    if (mongoose.connection.readyState !== 1) await connectDB();
+    const col = mongoose.connection.db.collection('telegram_subscribers');
+    const doc = await col.findOne({ _id: 'subscribers' });
+    const chatIds = doc?.chatIds || [];
+
+    if (chatIds.includes(chatId)) {
+      return;
+    }
+    if (chatIds.length >= 2) {
+      const token = process.env.TELEGRAM_BOT_TOKEN;
+      if (token) {
+        const fetch = require('node-fetch');
+        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            text: 'Limit reached. Only 2 users can receive notifications.',
+          }),
+        });
+      }
+      return;
+    }
+
+    chatIds.push(chatId);
+    await col.updateOne(
+      { _id: 'subscribers' },
+      { $set: { chatIds, updatedAt: new Date() } },
+      { upsert: true }
+    );
+
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (token) {
+      const fetch = require('node-fetch');
+      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: "You're registered for email notifications.",
+        }),
+      });
+    }
+  } catch (err) {
+    console.error('Telegram webhook error:', err);
+  }
+});
+
+// --- Telegram setWebhook setup (one-time) ---
+
+app.get('/api/setup/telegram-webhook', async (req, res) => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const baseUrl = process.env.BASE_URL || 'https://yarodeploy.vercel.app';
+  const url = `${baseUrl.replace(/\/$/, '')}/api/telegram/webhook`;
+
+  if (!token) {
+    return res.status(500).send('TELEGRAM_BOT_TOKEN not set');
+  }
+
+  try {
+    const fetch = require('node-fetch');
+    const resp = await fetch(
+      `https://api.telegram.org/bot${token}/setWebhook?url=${encodeURIComponent(url)}`
+    );
+    const data = await resp.json();
+    if (data.ok) {
+      res.send(`<h1>Telegram webhook set</h1><p>URL: ${url}</p>`);
+    } else {
+      res.status(500).send(`Telegram API error: ${JSON.stringify(data)}`);
+    }
+  } catch (err) {
+    res.status(500).send(`Error: ${err.message}`);
   }
 });
 
