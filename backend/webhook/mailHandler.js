@@ -31,7 +31,7 @@ async function sendTelegramMessage(chatId, text) {
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text }),
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
   });
   if (!response.ok) {
     const errText = await response.text();
@@ -184,7 +184,7 @@ async function handleMailNotification(notification) {
         summaryBlock = await rewriteEmailWithOpenAI(normalizedBody);
       }
 
-      const fullMessage = `${header}\n\nSummary:\n\n${summaryBlock}`;
+      const fullMessage = `<b>${header}</b>\n\n<b>📧 Email Summary:</b>\n\n${summaryBlock}`;
 
       const chatIds = await getTelegramChatIds();
       for (const chatId of chatIds) {
