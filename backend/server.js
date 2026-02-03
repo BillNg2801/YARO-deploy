@@ -184,15 +184,17 @@ app.post('/api/send-test', async (req, res) => {
 
 // --- Mail webhook (Microsoft Graph) ---
 
-app.post('/api/webhook/mail', (req, res) => {
+app.post('/api/webhook/mail', async (req, res) => {
   const validationToken = req.query.validationToken;
   if (validationToken) {
     return res.type('text/plain').send(validationToken);
   }
+  try {
+    await handleMailNotification(req.body);
+  } catch (err) {
+    console.error('Mail webhook processing error:', err);
+  }
   res.status(202).send();
-  handleMailNotification(req.body).catch((err) =>
-    console.error('Mail webhook processing error:', err)
-  );
 });
 
 // --- Subscription creation ---

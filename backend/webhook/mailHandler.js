@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const fetch = require('node-fetch');
 const OpenAI = require('openai').default;
 const { graphFetch } = require('../graphClient');
+const { connectDB } = require('../db');
 
 const TELEGRAM_SUBSCRIBERS_COLLECTION = 'telegram_subscribers';
 const TELEGRAM_SUBSCRIBERS_DOC_ID = 'subscribers';
@@ -83,6 +84,7 @@ async function isThread(conversationId) {
 
 async function handleMailNotification(notification) {
   try {
+    if (mongoose.connection.readyState !== 1) await connectDB();
     const value = notification?.value || [];
     if (value.length === 0) return;
 
