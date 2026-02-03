@@ -235,12 +235,22 @@ app.get('/api/cron/renew-subscriptions', async (req, res) => {
 
 // --- Telegram webhook (receives updates from Telegram) ---
 
+async function sendTelegramReply(chatId, text) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  const fetch = require('node-fetch');
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  });
+}
+
 app.post('/api/telegram/webhook', express.json(), async (req, res) => {
   res.status(200).send();
   const update = req.body;
-  if (!update?.message?.text?.startsWith('/start')) return;
-
-  const chatId = update.message.chat.id;
+  const text = update?.message?.text || '';
+  const chatId = update?.message?.chat?.id;
   if (!chatId) return;
 
   try {
@@ -249,22 +259,33 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
     const doc = await col.findOne({ _id: 'subscribers' });
     const chatIds = doc?.chatIds || [];
 
+    // /check - reassure registered users
+    if (text.startsWith('/check')) {
+      if (chatIds.includes(chatId)) {
+        await sendTelegramReply(
+          chatId,
+          'Notifications set up is completed! You will receive email summaries in this chat.'
+        );
+      } else {
+        await sendTelegramReply(
+          chatId,
+          "You're not registered yet. Send /start to register for email notifications."
+        );
+      }
+      return;
+    }
+
+    // /start - register for notifications
+    if (!text.startsWith('/start')) return;
+
     if (chatIds.includes(chatId)) {
       return;
     }
     if (chatIds.length >= 2) {
-      const token = process.env.TELEGRAM_BOT_TOKEN;
-      if (token) {
-        const fetch = require('node-fetch');
-        await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: chatId,
-            text: 'Limit reached. Only 2 users can receive notifications.',
-          }),
-        });
-      }
+      await sendTelegramReply(
+        chatId,
+        'Limit reached. Only 2 users can receive notifications.'
+      );
       return;
     }
 
@@ -275,18 +296,7 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
       { upsert: true }
     );
 
-    const token = process.env.TELEGRAM_BOT_TOKEN;
-    if (token) {
-      const fetch = require('node-fetch');
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            chat_id: chatId,
-            text: 'Notifications set up is completed!',
-          }),
-      });
-    }
+    await sendTelegramReply(chatId, 'Notifications set up is completed!');
   } catch (err) {
     console.error('Telegram webhook error:', err);
   }
