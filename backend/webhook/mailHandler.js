@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const mongoose = require('mongoose');
 const fetch = require('node-fetch');
 const OpenAI = require('openai').default;
@@ -6,7 +7,9 @@ const { connectDB } = require('../db');
 
 const TELEGRAM_SUBSCRIBERS_COLLECTION = 'telegram_subscribers';
 const TELEGRAM_SUBSCRIBERS_DOC_ID = 'subscribers';
+const EMAIL_VIEWS_COLLECTION = 'email_notification_views';
 const MAX_SUBSCRIBERS = 2;
+const TELEGRAM_MESSAGE_MAX_LENGTH = 4096;
 
 async function getTelegramChatIds() {
   try {
@@ -21,17 +24,23 @@ async function getTelegramChatIds() {
   }
 }
 
-async function sendTelegramMessage(chatId, text) {
+async function sendTelegramMessage(chatId, text, options = {}) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
     console.warn('TELEGRAM_BOT_TOKEN not set; skipping Telegram send.');
     return;
   }
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  const body = {
+    chat_id: chatId,
+    text,
+    parse_mode: options.parse_mode !== undefined ? options.parse_mode : 'HTML',
+  };
+  if (options.reply_markup) body.reply_markup = options.reply_markup;
   const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     const errText = await response.text();
@@ -207,10 +216,38 @@ async function handleMailNotification(notification) {
       }
 
       const fullMessage = `<b>${header}</b>\n\n<b>📧 Email Summary:</b>\n\n${summaryBlock}`;
+      const fullEmailMessage = `${header}\n\nFull email:\n\n${normalizedBody}`;
+      const fullText =
+        fullEmailMessage.length <= TELEGRAM_MESSAGE_MAX_LENGTH
+          ? fullEmailMessage
+          : fullEmailMessage.slice(0, TELEGRAM_MESSAGE_MAX_LENGTH - 20) + '\n\n... (truncated)';
+
+      const uuid = crypto.randomUUID();
+      let replyMarkup = null;
+      if (mongoose.connection.db) {
+        const viewsCol = mongoose.connection.db.collection(EMAIL_VIEWS_COLLECTION);
+        try {
+          await viewsCol.createIndex(
+            { createdAt: 1 },
+            { expireAfterSeconds: 24 * 60 * 60 }
+          );
+        } catch (ttlErr) {
+          if (ttlErr.code !== 85 && ttlErr.code !== 86) console.error('email_notification_views TTL:', ttlErr.message);
+        }
+        await viewsCol.insertOne({
+          _id: uuid,
+          summaryText: fullMessage,
+          fullText,
+          createdAt: new Date(),
+        });
+        replyMarkup = {
+          inline_keyboard: [[{ text: 'See full email', callback_data: `view_full:${uuid}` }]],
+        };
+      }
 
       const chatIds = await getTelegramChatIds();
       for (const chatId of chatIds) {
-        await sendTelegramMessage(chatId, fullMessage);
+        await sendTelegramMessage(chatId, fullMessage, replyMarkup ? { reply_markup: replyMarkup } : {});
       }
     }
   } catch (err) {

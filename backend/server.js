@@ -248,12 +248,81 @@ async function sendTelegramReply(chatId, text) {
   });
 }
 
+const EMAIL_VIEWS_COLLECTION = 'email_notification_views';
+
+async function telegramEditMessageText(chatId, messageId, text, options = {}) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  const fetch = require('node-fetch');
+  const body = { chat_id: chatId, message_id: messageId, text };
+  if (options.parse_mode !== undefined) body.parse_mode = options.parse_mode;
+  if (options.reply_markup) body.reply_markup = options.reply_markup;
+  await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+async function telegramAnswerCallbackQuery(callbackQueryId) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  const fetch = require('node-fetch');
+  await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: callbackQueryId }),
+  });
+}
+
 app.post('/api/telegram/webhook', express.json(), async (req, res) => {
   const update = req.body;
-  const text = update?.message?.text || '';
-  const chatId = update?.message?.chat?.id;
+  const callbackQuery = update?.callback_query;
 
   try {
+    if (callbackQuery) {
+      const data = callbackQuery.data || '';
+      const chatId = callbackQuery.message?.chat?.id;
+      const messageId = callbackQuery.message?.message_id;
+      const callbackQueryId = callbackQuery.id;
+      if (!chatId || !messageId) {
+        res.status(200).send();
+        return;
+      }
+      if (mongoose.connection.readyState !== 1) await connectDB();
+      const viewsCol = mongoose.connection.db?.collection(EMAIL_VIEWS_COLLECTION);
+      const uuid = data.startsWith('view_full:')
+        ? data.slice('view_full:'.length)
+        : data.startsWith('view_summary:')
+          ? data.slice('view_summary:'.length)
+          : null;
+      if (uuid && viewsCol) {
+        const doc = await viewsCol.findOne({ _id: uuid });
+        if (doc) {
+          if (data.startsWith('view_full:')) {
+            await telegramEditMessageText(chatId, messageId, doc.fullText, {
+              reply_markup: {
+                inline_keyboard: [[{ text: 'Go back to the summary', callback_data: `view_summary:${uuid}` }]],
+              },
+            });
+          } else if (data.startsWith('view_summary:')) {
+            await telegramEditMessageText(chatId, messageId, doc.summaryText, {
+              parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: [[{ text: 'See full email', callback_data: `view_full:${uuid}` }]],
+              },
+            });
+          }
+        }
+      }
+      await telegramAnswerCallbackQuery(callbackQueryId);
+      res.status(200).send();
+      return;
+    }
+
+    const text = update?.message?.text || '';
+    const chatId = update?.message?.chat?.id;
+
     if (!chatId) {
       res.status(200).send();
       return;
