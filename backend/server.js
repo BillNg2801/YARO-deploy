@@ -301,6 +301,7 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
         if (doc) {
           if (data.startsWith('view_full:')) {
             await telegramEditMessageText(chatId, messageId, doc.fullText, {
+              parse_mode: 'HTML',
               reply_markup: {
                 inline_keyboard: [[{ text: 'Go back to the summary', callback_data: `view_summary:${uuid}` }]],
               },
@@ -309,7 +310,7 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
             await telegramEditMessageText(chatId, messageId, doc.summaryText, {
               parse_mode: 'HTML',
               reply_markup: {
-                inline_keyboard: [[{ text: 'See full email', callback_data: `view_full:${uuid}` }]],
+                inline_keyboard: [[{ text: 'See the full email', callback_data: `view_full:${uuid}` }]],
               },
             });
           }
