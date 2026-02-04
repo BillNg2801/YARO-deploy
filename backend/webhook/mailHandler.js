@@ -237,8 +237,8 @@ async function handleMailNotification(notification) {
 
       const fullMessage = `<b>${header}</b>\n\n<b>📧 Email Summary:</b>\n\n${summaryBlock}`;
       const formattedBody = formatFullEmailBody(content);
-      const bodyHtml = escapeHtml(formattedBody).replace(/\n/g, '<br>');
-      const prefix = '<b>' + escapeHtml(header) + '</b><br><br><b>Full email:</b><br><br>';
+      const bodyHtml = escapeHtml(formattedBody);
+      const prefix = '<b>' + escapeHtml(header) + '</b>\n\n<b>Full email:</b>\n\n';
       const truncateSuffix = '... (truncated)';
       let bodyPart = bodyHtml;
       if (prefix.length + bodyPart.length + truncateSuffix.length > TELEGRAM_MESSAGE_MAX_LENGTH) {
