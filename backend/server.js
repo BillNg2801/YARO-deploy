@@ -257,11 +257,15 @@ async function telegramEditMessageText(chatId, messageId, text, options = {}) {
   const body = { chat_id: chatId, message_id: messageId, text };
   if (options.parse_mode !== undefined) body.parse_mode = options.parse_mode;
   if (options.reply_markup) body.reply_markup = options.reply_markup;
-  await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+  const response = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+  if (!response.ok) {
+    const errBody = await response.text();
+    console.error('Telegram editMessageText failed:', response.status, errBody);
+  }
 }
 
 async function telegramAnswerCallbackQuery(callbackQueryId) {
@@ -290,6 +294,9 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
         return;
       }
       if (mongoose.connection.readyState !== 1) await connectDB();
+      if (!mongoose.connection.db) {
+        console.error('Telegram callback: db not available');
+      }
       const viewsCol = mongoose.connection.db?.collection(EMAIL_VIEWS_COLLECTION);
       const uuid = data.startsWith('view_full:')
         ? data.slice('view_full:'.length)
@@ -298,22 +305,25 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
           : null;
       if (uuid && viewsCol) {
         const doc = await viewsCol.findOne({ _id: uuid });
-        if (doc) {
-          if (data.startsWith('view_full:')) {
-            await telegramEditMessageText(chatId, messageId, doc.fullText, {
-              parse_mode: 'HTML',
-              reply_markup: {
-                inline_keyboard: [[{ text: 'Go back to the summary', callback_data: `view_summary:${uuid}` }]],
-              },
-            });
-          } else if (data.startsWith('view_summary:')) {
-            await telegramEditMessageText(chatId, messageId, doc.summaryText, {
-              parse_mode: 'HTML',
-              reply_markup: {
-                inline_keyboard: [[{ text: 'See the full email', callback_data: `view_full:${uuid}` }]],
-              },
-            });
-          }
+        if (!doc) {
+          console.error('Telegram callback: view not found for uuid', uuid);
+        } else if (data.startsWith('view_full:')) {
+          const fullText = doc.fullText || '';
+          const useHtml = fullText.includes('<br>') || fullText.startsWith('<b>');
+          const options = {
+            reply_markup: {
+              inline_keyboard: [[{ text: 'Go back to the summary', callback_data: `view_summary:${uuid}` }]],
+            },
+          };
+          if (useHtml) options.parse_mode = 'HTML';
+          await telegramEditMessageText(chatId, messageId, fullText, options);
+        } else if (data.startsWith('view_summary:')) {
+          await telegramEditMessageText(chatId, messageId, doc.summaryText, {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [[{ text: 'See the full email', callback_data: `view_full:${uuid}` }]],
+            },
+          });
         }
       }
       await telegramAnswerCallbackQuery(callbackQueryId);
