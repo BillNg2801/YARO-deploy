@@ -236,15 +236,11 @@ async function handleMailNotification(notification) {
       }
 
       const fullMessage = `<b>${header}</b>\n\n<b>📧 Email Summary:</b>\n\n${summaryBlock}`;
-      const formattedBody = formatFullEmailBody(content);
-      const bodyHtml = escapeHtml(formattedBody).replace(/\n/g, '<br>');
-      const prefix = `<b>${escapeHtml(header)}</b><br><br><b>Full email:</b><br><br>`;
-      let bodyPart = bodyHtml;
-      const truncateSuffix = '... (truncated)';
-      if (prefix.length + bodyPart.length + truncateSuffix.length > TELEGRAM_MESSAGE_MAX_LENGTH) {
-        bodyPart = bodyPart.slice(0, TELEGRAM_MESSAGE_MAX_LENGTH - prefix.length - truncateSuffix.length) + truncateSuffix;
-      }
-      const fullText = prefix + bodyPart;
+      const fullEmailMessage = `${header}\n\nFull email:\n\n${normalizedBody}`;
+      const fullText =
+        fullEmailMessage.length <= TELEGRAM_MESSAGE_MAX_LENGTH
+          ? fullEmailMessage
+          : fullEmailMessage.slice(0, TELEGRAM_MESSAGE_MAX_LENGTH - 20) + '\n\n... (truncated)';
 
       const uuid = crypto.randomUUID();
       let replyMarkup = null;

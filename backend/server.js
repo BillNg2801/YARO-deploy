@@ -308,15 +308,11 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
         if (!doc) {
           console.error('Telegram callback: view not found for uuid', uuid);
         } else if (data.startsWith('view_full:')) {
-          const fullText = doc.fullText || '';
-          const useHtml = fullText.includes('<br>') || fullText.startsWith('<b>');
-          const options = {
+          await telegramEditMessageText(chatId, messageId, doc.fullText || '', {
             reply_markup: {
               inline_keyboard: [[{ text: 'Go back to the summary', callback_data: `view_summary:${uuid}` }]],
             },
-          };
-          if (useHtml) options.parse_mode = 'HTML';
-          await telegramEditMessageText(chatId, messageId, fullText, options);
+          });
         } else if (data.startsWith('view_summary:')) {
           await telegramEditMessageText(chatId, messageId, doc.summaryText, {
             parse_mode: 'HTML',
