@@ -139,17 +139,39 @@ async function isThread(conversationId) {
   }
 }
 
+const PROCESSED_MAIL_IDS_COLLECTION = 'processed_mail_ids';
+
+async function ensureProcessedMailIdsTTL() {
+  try {
+    if (mongoose.connection.readyState !== 1 || !mongoose.connection.db) return;
+    const col = mongoose.connection.db.collection(PROCESSED_MAIL_IDS_COLLECTION);
+    await col.createIndex({ processedAt: 1 }, { expireAfterSeconds: 30 * 24 * 60 * 60 });
+  } catch (err) {
+    if (err.code !== 85 && err.code !== 86) console.error('processed_mail_ids TTL index:', err.message);
+  }
+}
+
 async function handleMailNotification(notification) {
   try {
     if (mongoose.connection.readyState !== 1) await connectDB();
     const value = notification?.value || [];
     if (value.length === 0) return;
 
-    for (const item of value) {
-      const resourceData = item?.resourceData;
-      if (!resourceData?.id) continue;
+    const rawIds = value.map((item) => item?.resourceData?.id).filter(Boolean);
+    const messageIds = [...new Set(rawIds)];
+    console.log('Mail webhook: value.length=%d, messageIds=%j', value.length, rawIds);
+    ensureProcessedMailIdsTTL().catch(() => {});
 
-      const messageId = resourceData.id;
+    for (const messageId of messageIds) {
+      try {
+        await mongoose.connection.db.collection(PROCESSED_MAIL_IDS_COLLECTION).insertOne({
+          _id: messageId,
+          processedAt: new Date(),
+        });
+      } catch (insertErr) {
+        if (insertErr.code === 11000) continue;
+        throw insertErr;
+      }
 
       let message;
       try {
