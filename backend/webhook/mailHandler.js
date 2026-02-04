@@ -2,8 +2,19 @@ const crypto = require('crypto');
 const mongoose = require('mongoose');
 const fetch = require('node-fetch');
 const OpenAI = require('openai').default;
+const { convert: htmlToTextConvert } = require('html-to-text');
 const { graphFetch } = require('../graphClient');
 const { connectDB } = require('../db');
+
+function htmlToPlainText(html) {
+  if (!html) return '';
+  try {
+    return htmlToTextConvert(String(html), { wordwrap: false });
+  } catch (err) {
+    console.error('htmlToPlainText failed:', err.message);
+    return stripHtml(html);
+  }
+}
 
 const TELEGRAM_SUBSCRIBERS_COLLECTION = 'telegram_subscribers';
 const TELEGRAM_SUBSCRIBERS_DOC_ID = 'subscribers';
@@ -216,7 +227,8 @@ async function handleMailNotification(notification) {
         from?.name || from?.address || 'Unknown';
       const bodyObj = message?.body || {};
       const contentType = bodyObj.contentType || 'text';
-      let content = bodyObj.content || '';
+      const rawBody = bodyObj.content || '';
+      let content = rawBody;
       if (contentType === 'html') content = stripHtml(content);
       const normalizedBody = normalizeEmailBody(content);
 
@@ -235,7 +247,7 @@ async function handleMailNotification(notification) {
       }
 
       const fullMessage = `<b>${header}</b>\n\n<b>📧 Email Summary:</b>\n\n${summaryBlock}`;
-      const formattedBody = formatFullEmailBody(content);
+      const formattedBody = contentType === 'html' ? htmlToPlainText(rawBody) : formatFullEmailBody(rawBody);
       const bodyHtml = escapeHtml(formattedBody);
       const prefix = '<b>' + escapeHtml(header) + '</b>\n\n<b>Full email:</b>\n\n';
       const truncateSuffix = '... (truncated)';

@@ -10,11 +10,12 @@
   "dependencies": {
     "@azure/msal-node": "^2.16.2",
     "dotenv": "^16.4.5",
-    "openai": "^4.20.0",
     "express": "^4.21.2",
+    "html-to-text": "^9.0.5",
     "mongoose": "^8.0.0",
     "node-fetch": "^2.7.0",
-    "node-telegram-bot-api": "^0.66.0"
+    "node-telegram-bot-api": "^0.66.0",
+    "openai": "^4.20.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
@@ -23,4 +24,3 @@
   "author": "",
   "license": "MIT"
 }
-
