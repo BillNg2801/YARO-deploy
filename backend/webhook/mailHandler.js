@@ -107,7 +107,6 @@ function formatFullEmailBody(content) {
   return s
     .split('\n')
     .map((line) => line.replace(/\s+/g, ' ').trim())
-    .filter(Boolean)
     .join('\n');
 }
 
