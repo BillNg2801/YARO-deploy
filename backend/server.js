@@ -11,6 +11,7 @@ const { handleMailNotification } = require('./webhook/mailHandler');
 const {
   createMailSubscription,
   renewExpiringSubscriptions,
+  getStoredSubscription,
 } = require('./subscription');
 const {
   expandDraftWithOpenAI,
@@ -548,6 +549,31 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
     const col = mongoose.connection.db.collection('telegram_subscribers');
     const doc = await col.findOne({ _id: 'subscribers' });
     const chatIds = doc?.chatIds || [];
+
+    // /subscription - show mail subscription status
+    if (text.startsWith('/subscription')) {
+      const sub = await getStoredSubscription();
+      const baseUrl = process.env.BASE_URL || 'https://yarodeploy.vercel.app';
+      const subscribeUrl = `${baseUrl.replace(/\/$/, '')}/api/subscribe`;
+      if (sub?.expirationDateTime && new Date(sub.expirationDateTime) > new Date()) {
+        const expiresAt = new Date(sub.expirationDateTime);
+        const expiresStr = expiresAt.toLocaleString('en-US', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        });
+        await sendTelegramReply(
+          chatId,
+          `Your mail subscription is active. New emails will trigger notifications.\n\nExpires: ${expiresStr}`
+        );
+      } else {
+        await sendTelegramReply(
+          chatId,
+          `You don't have an active mail subscription. Visit ${subscribeUrl} to create one.`
+        );
+      }
+      res.status(200).send();
+      return;
+    }
 
     // /check - reassure registered users
     if (text.startsWith('/check')) {
