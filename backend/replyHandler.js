@@ -3,6 +3,12 @@ const { graphFetch } = require('./graphClient');
 
 const SIGN_OFF = 'Best regards,\nNaked Car Studio';
 
+// Remove any trailing "Best regards," + optional whitespace + "Naked Car Studio" so we can append the correct one once
+function stripTrailingSignOff(text) {
+  if (!text || typeof text !== 'string') return text;
+  return text.replace(/\n*\s*Best regards,?\s*\n+\s*Naked Car Studio\s*$/i, '').trimEnd();
+}
+
 async function expandDraftWithOpenAI(userMessage, senderName) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -21,7 +27,7 @@ Convert their short message into a polite, respectful, professional email.
 Rules:
 - Start with a greeting (e.g. "Dear [Name]," or "Hi,")
 - Use proper paragraph breaks (blank line between paragraphs)
-- Always end with exactly: "Best regards," then newline then "Naked Car Studio"
+- Do NOT add a sign-off at the end - the system will add it automatically
 - Output plain text only, well-formatted with double newlines between paragraphs
 - Keep tone professional and friendly
 
@@ -33,9 +39,8 @@ Recipient name (for greeting): ${senderName || 'there'}`,
   });
 
   let draft = completion.choices?.[0]?.message?.content?.trim() || '';
-  if (!draft.endsWith(SIGN_OFF)) {
-    draft = draft.replace(/\s*$/, '') + (draft ? '\n\n' : '') + SIGN_OFF;
-  }
+  draft = stripTrailingSignOff(draft);
+  draft = (draft ? draft.replace(/\s*$/, '') + '\n\n' : '') + SIGN_OFF;
   return ensureFormattedDraft(draft);
 }
 
@@ -58,7 +63,7 @@ ${draft}
 
 User's edit request: ${feedback}
 
-Apply the changes. Keep the same format: greeting, body paragraphs, end with "Best regards," then newline then "Naked Car Studio".
+Apply the changes. Do NOT add a sign-off at the end - the system will add it automatically.
 Output the revised email only, well-formatted with double newlines between paragraphs.`,
       },
     ],
@@ -66,9 +71,8 @@ Output the revised email only, well-formatted with double newlines between parag
   });
 
   let revised = completion.choices?.[0]?.message?.content?.trim() || draft;
-  if (!revised.endsWith(SIGN_OFF)) {
-    revised = revised.replace(/\s*$/, '') + (revised ? '\n\n' : '') + SIGN_OFF;
-  }
+  revised = stripTrailingSignOff(revised);
+  revised = (revised ? revised.replace(/\s*$/, '') + '\n\n' : '') + SIGN_OFF;
   return ensureFormattedDraft(revised);
 }
 

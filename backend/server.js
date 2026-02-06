@@ -320,6 +320,16 @@ async function telegramAnswerCallbackQuery(callbackQueryId) {
   });
 }
 
+async function telegramDeleteMessage(chatId, messageId) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  const fetch = require('node-fetch');
+  const resp = await fetch(
+    `https://api.telegram.org/bot${token}/deleteMessage?chat_id=${chatId}&message_id=${messageId}`
+  );
+  if (!resp.ok) console.error('Telegram deleteMessage failed:', await resp.text());
+}
+
 app.post('/api/telegram/webhook', express.json(), async (req, res) => {
   const update = req.body;
   const callbackQuery = update?.callback_query;
@@ -383,7 +393,14 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
             '?';
           await replyStateCol.updateOne(
             { _id: chatId },
-            { $set: { viewUuid: uuid, mode: 'awaiting_reply', updatedAt: new Date() } },
+            {
+              $set: {
+                viewUuid: uuid,
+                mode: 'awaiting_reply',
+                telegramSummaryMessageId: messageId,
+                updatedAt: new Date(),
+              },
+            },
             { upsert: true }
           );
           await telegramEditMessageText(chatId, messageId, replyPrompt, {
@@ -408,10 +425,14 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
           if (!state || state.viewUuid !== uuid || !state.draft) {
             await sendTelegramMessage(chatId, 'No draft found. Please start the reply flow again.');
           } else {
+            const summaryMsgId = state.telegramSummaryMessageId;
+            const draftMsgId = messageId;
             try {
               await sendReplyViaGraph(doc.graphMessageId, state.draft);
               await replyStateCol.deleteOne({ _id: chatId });
               await sendTelegramMessage(chatId, 'Your email has been successfully delivered.');
+              if (summaryMsgId != null) await telegramDeleteMessage(chatId, summaryMsgId);
+              await telegramDeleteMessage(chatId, draftMsgId);
             } catch (err) {
               console.error('Send reply failed:', err);
               await sendTelegramMessage(
