@@ -1,21 +1,6 @@
 const OpenAI = require('openai').default;
 const { graphFetch } = require('./graphClient');
 
-const SIGN_OFF = 'Best regards,\nNaked Car Studio';
-
-// Remove the last two non-empty lines (AI sign-off); we then append our own sign-off
-function removeLastTwoNonEmptyLines(text) {
-  if (!text || typeof text !== 'string') return text;
-  const lines = text.split('\n');
-  const nonEmptyIndices = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim() !== '') nonEmptyIndices.push(i);
-  }
-  const toRemove = nonEmptyIndices.slice(-2);
-  toRemove.forEach((i) => (lines[i] = ''));
-  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd();
-}
-
 async function expandDraftWithOpenAI(userMessage, senderName) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -32,9 +17,9 @@ async function expandDraftWithOpenAI(userMessage, senderName) {
 Convert their short message into a polite, respectful, professional email.
 
 Rules:
-- Start with a greeting (e.g. "Dear [Name]," or "Hi,")
+- Start with "Dear [recipient name]," (e.g. Dear Nguyen, Phan Anh or Dear Phan Anh). Do not use "Hi".
 - Use proper paragraph breaks (blank line between paragraphs)
-- End with exactly a two-line sign-off (e.g. a closing phrase on one line like "Warm regards," and your name or company on the next line). The system will replace it with the correct sign-off.
+- Always end with a two-line sign-off: first line a closing phrase (e.g. "Best regards,"), second line exactly "Naked Car Studio". The sender is always Naked Car Studio.
 - Output plain text only, well-formatted with double newlines between paragraphs
 - Keep tone professional and friendly
 
@@ -45,9 +30,7 @@ Recipient name (for greeting): ${senderName || 'there'}`,
     max_tokens: 500,
   });
 
-  let draft = completion.choices?.[0]?.message?.content?.trim() || '';
-  draft = removeLastTwoNonEmptyLines(draft);
-  draft = (draft ? draft.replace(/\s*$/, '') + '\n\n' : '') + SIGN_OFF;
+  const draft = completion.choices?.[0]?.message?.content?.trim() || '';
   return ensureFormattedDraft(draft);
 }
 
@@ -70,16 +53,14 @@ ${draft}
 
 User's edit request: ${feedback}
 
-Apply the changes. End with exactly a two-line sign-off (closing phrase on one line, name or company on the next). The system will replace it with the correct sign-off.
+Apply the changes. Start with "Dear [recipient name]," (not "Hi"). End with a two-line sign-off: first line a closing phrase (e.g. "Best regards,"), second line exactly "Naked Car Studio".
 Output the revised email only, well-formatted with double newlines between paragraphs.`,
       },
     ],
     max_tokens: 800,
   });
 
-  let revised = completion.choices?.[0]?.message?.content?.trim() || draft;
-  revised = removeLastTwoNonEmptyLines(revised);
-  revised = (revised ? revised.replace(/\s*$/, '') + '\n\n' : '') + SIGN_OFF;
+  const revised = completion.choices?.[0]?.message?.content?.trim() || draft;
   return ensureFormattedDraft(revised);
 }
 
