@@ -17,9 +17,9 @@ async function expandDraftWithOpenAI(userMessage, senderName) {
 Convert their short message into a polite, respectful, professional email.
 
 Rules:
-- Start with "Dear [recipient name]," (e.g. Dear Nguyen, Phan Anh or Dear Phan Anh). Do not use "Hi".
+- Start with "Dear [recipient name]," (e.g. Dear Nguyen Phan Anh or Dear Phan Anh). Put a comma only at the end of the line after the full name; do not put commas between parts of the name. Do not use "Hi".
 - Use proper paragraph breaks (blank line between paragraphs)
-- Always end with a two-line sign-off: first line a closing phrase (e.g. "Best regards,"), second line exactly "Naked Car Studio". The sender is always Naked Car Studio.
+- Always end with a two-line sign-off: first line a closing phrase (e.g. "Best regards,"), second line exactly "Naked Car Studio". The sender is always Naked Car Studio. Do not end the email with any punctuation (no period or other mark after "Naked Car Studio" or after the closing phrase).
 - Output plain text only, well-formatted with double newlines between paragraphs
 - Keep tone professional and friendly
 
@@ -53,7 +53,7 @@ ${draft}
 
 User's edit request: ${feedback}
 
-Apply the changes. Start with "Dear [recipient name]," (not "Hi"). End with a two-line sign-off: first line a closing phrase (e.g. "Best regards,"), second line exactly "Naked Car Studio".
+Apply the changes. Start with "Dear [recipient name]," (not "Hi"); comma only at the end of the line after the full name, not between parts of the name. End with a two-line sign-off: first line a closing phrase (e.g. "Best regards,"), second line exactly "Naked Car Studio". Do not end the email with any punctuation (no period after "Naked Car Studio" or the closing phrase).
 Output the revised email only, well-formatted with double newlines between paragraphs.`,
       },
     ],
