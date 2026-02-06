@@ -87,11 +87,39 @@ function ensureFormattedDraft(text) {
     .trim();
 }
 
+function escapeHtml(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function plainTextToHtml(plainText) {
+  if (!plainText || typeof plainText !== 'string') return '';
+  const trimmed = plainText.trim();
+  if (!trimmed) return '<p></p>';
+  const paragraphs = trimmed.split(/\n\n+/);
+  return paragraphs
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => '<p>' + escapeHtml(p).replace(/\n/g, '<br>') + '</p>')
+    .join('\n');
+}
+
 async function sendReplyViaGraph(graphMessageId, body) {
   const formatted = ensureFormattedDraft(body);
+  const htmlContent = plainTextToHtml(formatted);
   await graphFetch(`/me/messages/${graphMessageId}/reply`, {
     method: 'POST',
-    body: JSON.stringify({ comment: formatted }),
+    body: JSON.stringify({
+      message: {
+        body: {
+          contentType: 'html',
+          content: htmlContent,
+        },
+      },
+    }),
   });
 }
 
