@@ -3,12 +3,17 @@ const { graphFetch } = require('./graphClient');
 
 const SIGN_OFF = 'Best regards,\nNaked Car Studio';
 
-// Remove any trailing sign-off (full block or orphan "Best regards,") so we can append the correct one once
-function stripTrailingSignOff(text) {
+// Remove the last two non-empty lines (AI sign-off); we then append our own sign-off
+function removeLastTwoNonEmptyLines(text) {
   if (!text || typeof text !== 'string') return text;
-  let s = text.replace(/\n*\s*Best regards,?\s*\n+\s*Naked Car Studio\s*$/i, '');
-  s = s.replace(/\n*\s*Best regards,?\s*$/i, '');
-  return s.trimEnd();
+  const lines = text.split('\n');
+  const nonEmptyIndices = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() !== '') nonEmptyIndices.push(i);
+  }
+  const toRemove = nonEmptyIndices.slice(-2);
+  toRemove.forEach((i) => (lines[i] = ''));
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd();
 }
 
 async function expandDraftWithOpenAI(userMessage, senderName) {
@@ -29,7 +34,7 @@ Convert their short message into a polite, respectful, professional email.
 Rules:
 - Start with a greeting (e.g. "Dear [Name]," or "Hi,")
 - Use proper paragraph breaks (blank line between paragraphs)
-- Do not include any sign-off or closing (no "Best regards," or "Naked Car Studio"). End your reply with the last sentence of the body. The system will add the correct sign-off automatically.
+- End with exactly a two-line sign-off (e.g. a closing phrase on one line like "Warm regards," and your name or company on the next line). The system will replace it with the correct sign-off.
 - Output plain text only, well-formatted with double newlines between paragraphs
 - Keep tone professional and friendly
 
@@ -41,7 +46,7 @@ Recipient name (for greeting): ${senderName || 'there'}`,
   });
 
   let draft = completion.choices?.[0]?.message?.content?.trim() || '';
-  draft = stripTrailingSignOff(draft);
+  draft = removeLastTwoNonEmptyLines(draft);
   draft = (draft ? draft.replace(/\s*$/, '') + '\n\n' : '') + SIGN_OFF;
   return ensureFormattedDraft(draft);
 }
@@ -65,7 +70,7 @@ ${draft}
 
 User's edit request: ${feedback}
 
-Apply the changes. Do not include any sign-off. End with the last sentence of the body. The system will add the correct sign-off automatically.
+Apply the changes. End with exactly a two-line sign-off (closing phrase on one line, name or company on the next). The system will replace it with the correct sign-off.
 Output the revised email only, well-formatted with double newlines between paragraphs.`,
       },
     ],
@@ -73,7 +78,7 @@ Output the revised email only, well-formatted with double newlines between parag
   });
 
   let revised = completion.choices?.[0]?.message?.content?.trim() || draft;
-  revised = stripTrailingSignOff(revised);
+  revised = removeLastTwoNonEmptyLines(revised);
   revised = (revised ? revised.replace(/\s*$/, '') + '\n\n' : '') + SIGN_OFF;
   return ensureFormattedDraft(revised);
 }
