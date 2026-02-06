@@ -12,6 +12,12 @@ const {
   createMailSubscription,
   renewExpiringSubscriptions,
 } = require('./subscription');
+const {
+  expandDraftWithOpenAI,
+  applyEditWithOpenAI,
+  sendReplyViaGraph,
+  ensureFormattedDraft,
+} = require('./replyHandler');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -249,6 +255,40 @@ async function sendTelegramReply(chatId, text) {
 }
 
 const EMAIL_VIEWS_COLLECTION = 'email_notification_views';
+const REPLY_STATE_COLLECTION = 'telegram_reply_state';
+
+async function ensureReplyStateTTL() {
+  try {
+    if (mongoose.connection.readyState !== 1 || !mongoose.connection.db) return;
+    const col = mongoose.connection.db.collection(REPLY_STATE_COLLECTION);
+    await col.createIndex({ updatedAt: 1 }, { expireAfterSeconds: 2 * 60 * 60 });
+  } catch (err) {
+    if (err.code !== 85 && err.code !== 86) console.error('reply_state TTL:', err.message);
+  }
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+async function sendTelegramMessage(chatId, text, options = {}) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  const fetch = require('node-fetch');
+  const body = { chat_id: chatId, text };
+  if (options.parse_mode) body.parse_mode = options.parse_mode;
+  if (options.reply_markup) body.reply_markup = options.reply_markup;
+  const resp = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) console.error('Telegram sendMessage failed:', await resp.text());
+}
 
 async function telegramEditMessageText(chatId, messageId, text, options = {}) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -298,11 +338,19 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
         console.error('Telegram callback: db not available');
       }
       const viewsCol = mongoose.connection.db?.collection(EMAIL_VIEWS_COLLECTION);
-      const uuid = data.startsWith('view_full:')
-        ? data.slice('view_full:'.length)
-        : data.startsWith('view_summary:')
-          ? data.slice('view_summary:'.length)
-          : null;
+      const replyStateCol = mongoose.connection.db?.collection(REPLY_STATE_COLLECTION);
+      ensureReplyStateTTL().catch(() => {});
+
+      const uuid =
+        data.startsWith('view_full:') ? data.slice('view_full:'.length)
+        : data.startsWith('view_summary:') ? data.slice('view_summary:'.length)
+        : data.startsWith('reply_start:') ? data.slice('reply_start:'.length)
+        : data.startsWith('reply_back:') ? data.slice('reply_back:'.length)
+        : data.startsWith('reply_send:') ? data.slice('reply_send:'.length)
+        : data.startsWith('reply_edit:') ? data.slice('reply_edit:'.length)
+        : data.startsWith('reply_cancel_edit:') ? data.slice('reply_cancel_edit:'.length)
+        : null;
+
       if (uuid && viewsCol) {
         const doc = await viewsCol.findOne({ _id: uuid });
         if (!doc) {
@@ -320,9 +368,97 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
           await telegramEditMessageText(chatId, messageId, doc.summaryText, {
             parse_mode: 'HTML',
             reply_markup: {
-              inline_keyboard: [[{ text: 'See the full email', callback_data: `view_full:${uuid}` }]],
+              inline_keyboard: [
+                [{ text: 'See the full email', callback_data: `view_full:${uuid}` }],
+                [{ text: 'REPLY', callback_data: `reply_start:${uuid}` }],
+              ],
             },
           });
+        } else if (data.startsWith('reply_start:')) {
+          const replyPrompt =
+            (doc.summaryText || '') +
+            '\n\nWhat would you like to say to ' +
+            (doc.senderName || 'them') +
+            '?';
+          await replyStateCol.updateOne(
+            { _id: chatId },
+            { $set: { viewUuid: uuid, mode: 'awaiting_reply', updatedAt: new Date() } },
+            { upsert: true }
+          );
+          await telegramEditMessageText(chatId, messageId, replyPrompt, {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [[{ text: 'Back', callback_data: `reply_back:${uuid}` }]],
+            },
+          });
+        } else if (data.startsWith('reply_back:')) {
+          await replyStateCol.deleteOne({ _id: chatId });
+          await telegramEditMessageText(chatId, messageId, doc.summaryText, {
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [
+                [{ text: 'See the full email', callback_data: `view_full:${uuid}` }],
+                [{ text: 'REPLY', callback_data: `reply_start:${uuid}` }],
+              ],
+            },
+          });
+        } else if (data.startsWith('reply_send:')) {
+          const state = await replyStateCol.findOne({ _id: chatId });
+          if (!state || state.viewUuid !== uuid || !state.draft) {
+            await sendTelegramMessage(chatId, 'No draft found. Please start the reply flow again.');
+          } else {
+            try {
+              await sendReplyViaGraph(doc.graphMessageId, state.draft);
+              await replyStateCol.deleteOne({ _id: chatId });
+              await sendTelegramMessage(chatId, 'Your email has been successfully delivered.');
+            } catch (err) {
+              console.error('Send reply failed:', err);
+              await sendTelegramMessage(
+                chatId,
+                'Failed to send the email. Please try again or check your Outlook connection.'
+              );
+            }
+          }
+        } else if (data.startsWith('reply_edit:')) {
+          const state = await replyStateCol.findOne({ _id: chatId });
+          if (!state || state.viewUuid !== uuid || !state.draft) {
+            await sendTelegramMessage(chatId, 'No draft found. Please start the reply flow again.');
+          } else {
+            const editPrompt = escapeHtml(state.draft) + '\n\n<b>What would you like to change?</b>';
+            await replyStateCol.updateOne(
+              { _id: chatId },
+              { $set: { mode: 'awaiting_edit_feedback', telegramMessageId: messageId, updatedAt: new Date() } },
+              { upsert: true }
+            );
+            await telegramEditMessageText(chatId, messageId, editPrompt, {
+              parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: [[{ text: 'Back', callback_data: `reply_cancel_edit:${uuid}` }]],
+              },
+            });
+          }
+        } else if (data.startsWith('reply_cancel_edit:')) {
+          const state = await replyStateCol.findOne({ _id: chatId });
+          if (!state || state.viewUuid !== uuid || !state.draft) {
+            await sendTelegramMessage(chatId, 'No draft found. Please start the reply flow again.');
+          } else {
+            await replyStateCol.updateOne(
+              { _id: chatId },
+              { $set: { mode: 'awaiting_send_edit', updatedAt: new Date() } },
+              { upsert: true }
+            );
+            const draftText = ensureFormattedDraft(state.draft);
+            await telegramEditMessageText(chatId, messageId, draftText, {
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    { text: 'Send', callback_data: `reply_send:${uuid}` },
+                    { text: 'Edit', callback_data: `reply_edit:${uuid}` },
+                  ],
+                ],
+              },
+            });
+          }
         }
       }
       await telegramAnswerCallbackQuery(callbackQueryId);
@@ -338,6 +474,77 @@ app.post('/api/telegram/webhook', express.json(), async (req, res) => {
       return;
     }
     if (mongoose.connection.readyState !== 1) await connectDB();
+
+    const replyStateCol = mongoose.connection.db?.collection(REPLY_STATE_COLLECTION);
+    const viewsCol = mongoose.connection.db?.collection(EMAIL_VIEWS_COLLECTION);
+    const state = replyStateCol ? await replyStateCol.findOne({ _id: chatId }) : null;
+
+    if (state && viewsCol && text && !text.startsWith('/')) {
+      const viewDoc = await viewsCol.findOne({ _id: state.viewUuid });
+      if (!viewDoc) {
+        await replyStateCol.deleteOne({ _id: chatId });
+      } else if (state.mode === 'awaiting_reply') {
+        try {
+          const draft = await expandDraftWithOpenAI(text, viewDoc.senderName);
+          await replyStateCol.updateOne(
+            { _id: chatId },
+            { $set: { draft, mode: 'awaiting_send_edit', updatedAt: new Date() } },
+            { upsert: true }
+          );
+          await sendTelegramMessage(chatId, draft, {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: 'Send', callback_data: `reply_send:${state.viewUuid}` },
+                  { text: 'Edit', callback_data: `reply_edit:${state.viewUuid}` },
+                ],
+              ],
+            },
+          });
+        } catch (err) {
+          console.error('expandDraftWithOpenAI failed:', err);
+          await sendTelegramMessage(
+            chatId,
+            'Failed to generate the email. Please try again or check that OPENAI_API_KEY is set.'
+          );
+        }
+        res.status(200).send();
+        return;
+      } else if (state.mode === 'awaiting_edit_feedback') {
+        try {
+          const revised = await applyEditWithOpenAI(state.draft, text);
+          await replyStateCol.updateOne(
+            { _id: chatId },
+            { $set: { draft: revised, mode: 'awaiting_send_edit', updatedAt: new Date() } },
+            { upsert: true }
+          );
+          const replyMarkup = {
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  { text: 'Send', callback_data: `reply_send:${state.viewUuid}` },
+                  { text: 'Edit', callback_data: `reply_edit:${state.viewUuid}` },
+                ],
+              ],
+            },
+          };
+          if (state.telegramMessageId != null) {
+            await telegramEditMessageText(chatId, state.telegramMessageId, revised, replyMarkup);
+          } else {
+            await sendTelegramMessage(chatId, revised, replyMarkup);
+          }
+        } catch (err) {
+          console.error('applyEditWithOpenAI failed:', err);
+          await sendTelegramMessage(
+            chatId,
+            'Failed to apply your changes. Please try again.'
+          );
+        }
+        res.status(200).send();
+        return;
+      }
+    }
+
     const col = mongoose.connection.db.collection('telegram_subscribers');
     const doc = await col.findOne({ _id: 'subscribers' });
     const chatIds = doc?.chatIds || [];

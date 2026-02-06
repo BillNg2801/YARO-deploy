@@ -215,7 +215,7 @@ async function handleMailNotification(notification) {
       let message;
       try {
         message = await graphFetch(
-          `/me/messages/${messageId}?$select=from,body,conversationId`
+          `/me/messages/${messageId}?$select=from,body,conversationId,subject`
         );
       } catch (err) {
         console.error('Failed to fetch message:', err.message);
@@ -269,14 +269,22 @@ async function handleMailNotification(notification) {
         } catch (ttlErr) {
           if (ttlErr.code !== 85 && ttlErr.code !== 86) console.error('email_notification_views TTL:', ttlErr.message);
         }
+        const senderEmail = from?.address || '';
         await viewsCol.insertOne({
           _id: uuid,
+          graphMessageId: messageId,
+          senderName,
+          senderEmail,
+          subject: message?.subject || '',
           summaryText: fullMessage,
           fullText,
           createdAt: new Date(),
         });
         replyMarkup = {
-          inline_keyboard: [[{ text: 'See the full email', callback_data: `view_full:${uuid}` }]],
+          inline_keyboard: [
+            [{ text: 'See the full email', callback_data: `view_full:${uuid}` }],
+            [{ text: 'REPLY', callback_data: `reply_start:${uuid}` }],
+          ],
         };
       }
 
