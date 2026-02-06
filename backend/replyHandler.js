@@ -3,10 +3,12 @@ const { graphFetch } = require('./graphClient');
 
 const SIGN_OFF = 'Best regards,\nNaked Car Studio';
 
-// Remove any trailing "Best regards," + optional whitespace + "Naked Car Studio" so we can append the correct one once
+// Remove any trailing sign-off (full block or orphan "Best regards,") so we can append the correct one once
 function stripTrailingSignOff(text) {
   if (!text || typeof text !== 'string') return text;
-  return text.replace(/\n*\s*Best regards,?\s*\n+\s*Naked Car Studio\s*$/i, '').trimEnd();
+  let s = text.replace(/\n*\s*Best regards,?\s*\n+\s*Naked Car Studio\s*$/i, '');
+  s = s.replace(/\n*\s*Best regards,?\s*$/i, '');
+  return s.trimEnd();
 }
 
 async function expandDraftWithOpenAI(userMessage, senderName) {
@@ -27,7 +29,7 @@ Convert their short message into a polite, respectful, professional email.
 Rules:
 - Start with a greeting (e.g. "Dear [Name]," or "Hi,")
 - Use proper paragraph breaks (blank line between paragraphs)
-- Do NOT add a sign-off at the end - the system will add it automatically
+- Do not include any sign-off or closing (no "Best regards," or "Naked Car Studio"). End your reply with the last sentence of the body. The system will add the correct sign-off automatically.
 - Output plain text only, well-formatted with double newlines between paragraphs
 - Keep tone professional and friendly
 
@@ -63,7 +65,7 @@ ${draft}
 
 User's edit request: ${feedback}
 
-Apply the changes. Do NOT add a sign-off at the end - the system will add it automatically.
+Apply the changes. Do not include any sign-off. End with the last sentence of the body. The system will add the correct sign-off automatically.
 Output the revised email only, well-formatted with double newlines between paragraphs.`,
       },
     ],
